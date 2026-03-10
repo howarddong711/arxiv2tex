@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from paper2tex.latex import (
+from arxiv2tex.latex import (
     build_manifest,
     build_section_tree,
     build_sections,

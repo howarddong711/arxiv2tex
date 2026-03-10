@@ -7,8 +7,8 @@ from .service import PaperService
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="paper2tex")
-    parser.add_argument("--cache-root", default=".paper-cache", help="Cache directory for downloaded papers.")
+    parser = argparse.ArgumentParser(prog="arxiv2tex")
+    parser.add_argument("--cache-root", default=".arxiv2tex-cache", help="Cache directory for downloaded papers.")
     parser.add_argument("--session-id", default=None, help="Optional session identifier for isolating pending confirmations.")
     subparsers = parser.add_subparsers(dest="command", required=True)
 

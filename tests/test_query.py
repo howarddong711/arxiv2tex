@@ -1,4 +1,4 @@
-from paper2tex.query import extract_arxiv_id, extract_title_query, parse_prompt_intent
+from arxiv2tex.query import extract_arxiv_id, extract_title_query, parse_prompt_intent
 
 
 def test_extract_title_from_cn_brackets():

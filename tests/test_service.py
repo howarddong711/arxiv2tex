@@ -1,8 +1,11 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from paper2tex.service import PaperService
-from paper2tex.types import ArxivPaper
+from arxiv2tex.service import PaperService
+from arxiv2tex.types import ArxivPaper
+
+
+CACHE_DIR_NAME = ".arxiv2tex-cache"
 
 
 def make_paper(arxiv_id: str, title: str) -> ArxivPaper:
@@ -21,7 +24,7 @@ def make_paper(arxiv_id: str, title: str) -> ArxivPaper:
 
 
 def test_confirm_does_not_write_alias_cache(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
 
     papers = [
         make_paper("1706.03762", "Attention Is All You Need"),
@@ -35,11 +38,11 @@ def test_confirm_does_not_write_alias_cache(tmp_path: Path):
 
     assert result["status"] == "confirm"
     assert result["candidates"][0]["first_author"] == "First Author"
-    assert not (tmp_path / ".paper-cache" / "arxiv" / "1706.03762v1" / "aliases.json").exists()
+    assert not (tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1" / "aliases.json").exists()
 
 
 def test_read_section_supports_cn_alias(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper_dir = service.cache.paper_dir("demo")
     paper_dir.mkdir(parents=True, exist_ok=True)
     (paper_dir / "reader.tex").write_text("\\section{Results}\nExperiments here.\n", encoding="utf-8")
@@ -51,7 +54,7 @@ def test_read_section_supports_cn_alias(tmp_path: Path):
 
 
 def test_select_candidate_by_ordinal_without_prepare(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     candidate = {
         "paper": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
         "score": 0.91,
@@ -75,7 +78,7 @@ def test_select_candidate_by_ordinal_without_prepare(tmp_path: Path):
 
 
 def test_handle_prompt_returns_section_result(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     service.resolve = lambda prompt, max_results=25, session_id=None: {  # type: ignore[assignment]
         "status": "resolved",
         "mode": "title_match",
@@ -85,7 +88,7 @@ def test_handle_prompt_returns_section_result(tmp_path: Path):
     service.prepare = lambda prompt, view="reader", session_id=None: {  # type: ignore[assignment]
         "status": "prepared",
         "cache_key": "1706.03762v1",
-        "paper_dir": str(tmp_path / ".paper-cache" / "arxiv" / "1706.03762v1"),
+        "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
         "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
     }
     service.overview = lambda cache_key: {"status": "ok", "sections": [{"title": "Results"}]}  # type: ignore[assignment]
@@ -106,7 +109,7 @@ def test_handle_prompt_returns_section_result(tmp_path: Path):
 
 
 def test_resolve_confirm_persists_pending_state(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     papers = [
         make_paper("1706.03762", "Attention Is All You Need"),
         make_paper("2501.09166", "Attention is All You Need Until You Need Retention"),
@@ -124,7 +127,7 @@ def test_resolve_confirm_persists_pending_state(tmp_path: Path):
 
 
 def test_handle_prompt_consumes_pending_selection(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     service.cache.save_pending_state(
         {
             "original_prompt": "帮我参考 attention is all you need 的实验部分写法",
@@ -152,7 +155,7 @@ def test_handle_prompt_consumes_pending_selection(tmp_path: Path):
     service.prepare = lambda prompt, view="reader", session_id=None: {  # type: ignore[assignment]
         "status": "prepared",
         "cache_key": "1706.03762v1",
-        "paper_dir": str(tmp_path / ".paper-cache" / "arxiv" / "1706.03762v1"),
+        "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
         "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
     }
     service.overview = lambda cache_key: {"status": "ok", "sections": [{"title": "Results"}]}  # type: ignore[assignment]
@@ -172,7 +175,7 @@ def test_handle_prompt_consumes_pending_selection(tmp_path: Path):
 
 
 def test_handle_prompt_accepts_casual_selection_phrase(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     service.cache.save_pending_state(
         {
             "original_prompt": "帮我看 attention all you need",
@@ -200,7 +203,7 @@ def test_handle_prompt_accepts_casual_selection_phrase(tmp_path: Path):
     service.prepare = lambda prompt, view="reader", session_id=None: {  # type: ignore[assignment]
         "status": "prepared",
         "cache_key": "1706.03762v1",
-        "paper_dir": str(tmp_path / ".paper-cache" / "arxiv" / "1706.03762v1"),
+        "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
         "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
     }
     service.overview = lambda cache_key: {"status": "ok", "sections": []}  # type: ignore[assignment]
@@ -212,7 +215,7 @@ def test_handle_prompt_accepts_casual_selection_phrase(tmp_path: Path):
 
 
 def test_pending_state_is_isolated_by_session(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     service.cache.save_pending_state({"session_id": "alpha", "candidates": [{"paper": make_paper("1706.03762", "Attention Is All You Need").to_dict()}]}, session_id="alpha")
     service.cache.save_pending_state({"session_id": "beta", "candidates": [{"paper": make_paper("2307.12775", "Medical Attention Review").to_dict()}]}, session_id="beta")
 
@@ -226,7 +229,7 @@ def test_pending_state_is_isolated_by_session(tmp_path: Path):
 
 
 def test_handle_prompt_consumes_only_requested_session(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     service.cache.save_pending_state(
         {
             "session_id": "alpha",
@@ -283,7 +286,7 @@ def test_handle_prompt_consumes_only_requested_session(tmp_path: Path):
         "status": "prepared",
         "session_id": session_id,
         "cache_key": "1706.03762v1",
-        "paper_dir": str(tmp_path / ".paper-cache" / "arxiv" / "1706.03762v1"),
+        "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
         "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
     }
     service.overview = lambda cache_key: {"status": "ok", "sections": []}  # type: ignore[assignment]
@@ -297,7 +300,7 @@ def test_handle_prompt_consumes_only_requested_session(tmp_path: Path):
 
 
 def test_pending_state_expires(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     expired = datetime.now(timezone.utc) - timedelta(seconds=10)
     service.cache.save_pending_state(
         {
@@ -314,7 +317,7 @@ def test_pending_state_expires(tmp_path: Path):
 
 
 def test_extract_writing_examples_prefers_matching_section(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper = make_paper("1706.03762", "Attention Is All You Need")
     paper_dir = service.cache.paper_dir(paper.cache_key)
     paper_dir.mkdir(parents=True, exist_ok=True)
@@ -335,7 +338,7 @@ def test_extract_writing_examples_prefers_matching_section(tmp_path: Path):
 
 
 def test_extract_writing_examples_abstract_fallback(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper = make_paper("1706.03762", "Attention Is All You Need")
     paper_dir = service.cache.paper_dir(paper.cache_key)
     paper_dir.mkdir(parents=True, exist_ok=True)
@@ -350,7 +353,7 @@ def test_extract_writing_examples_abstract_fallback(tmp_path: Path):
 
 
 def test_extract_writing_examples_reports_style_signals(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper = make_paper("1706.03762", "Attention Is All You Need")
     paper_dir = service.cache.paper_dir(paper.cache_key)
     paper_dir.mkdir(parents=True, exist_ok=True)
@@ -370,7 +373,7 @@ def test_extract_writing_examples_reports_style_signals(tmp_path: Path):
 
 
 def test_prepare_rebuilds_indexes_without_redownloading(tmp_path: Path):
-    service = PaperService(tmp_path / ".paper-cache")
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper = make_paper("1706.03762", "Attention Is All You Need")
     paper_dir = service.cache.paper_dir(paper.cache_key)
     source_dir = paper_dir / "source"

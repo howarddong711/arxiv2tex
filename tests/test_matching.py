@@ -1,5 +1,5 @@
-from paper2tex.matching import rerank_papers
-from paper2tex.types import ArxivPaper
+from arxiv2tex.matching import rerank_papers
+from arxiv2tex.types import ArxivPaper
 
 
 def make_paper(arxiv_id: str, title: str) -> ArxivPaper:

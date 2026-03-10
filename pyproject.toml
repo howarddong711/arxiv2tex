@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "paper2tex"
+name = "arxiv2tex"
 version = "0.1.0"
 description = "arXiv-first paper reader and TeX cache for coding agents"
 readme = "README.md"
@@ -21,8 +21,8 @@ dev = [
 ]
 
 [project.scripts]
-paper2tex = "paper2tex.cli:main"
-paper2tex-mcp = "paper2tex.mcp:main"
+arxiv2tex = "arxiv2tex.cli:main"
+arxiv2tex-mcp = "arxiv2tex.mcp:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

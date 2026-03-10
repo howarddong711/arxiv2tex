@@ -1,4 +1,4 @@
-"""paper2tex package."""
+"""arxiv2tex package."""
 
 __all__ = ["__version__"]
 

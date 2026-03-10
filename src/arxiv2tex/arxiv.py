@@ -25,7 +25,7 @@ def _is_within_directory(child: Path, parent: Path) -> bool:
 
 
 class ArxivClient:
-    def __init__(self, user_agent: str = "paper2tex/0.1.0") -> None:
+    def __init__(self, user_agent: str = "arxiv2tex/0.1.0") -> None:
         self.user_agent = user_agent
         self.ssl_context = ssl.create_default_context(cafile=certifi.where())
 

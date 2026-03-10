@@ -1,4 +1,4 @@
-.paper-cache/
+.arxiv2tex-cache/
 .tmp-cache*/
 .pytest_cache/
 __pycache__/
