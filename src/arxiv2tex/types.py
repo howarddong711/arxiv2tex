@@ -13,6 +13,24 @@ class PromptIntent:
     def to_dict(self) -> Dict[str, object]:
         return asdict(self)
 
+    @classmethod
+    def from_dict(cls, payload: Dict[str, object]) -> "PromptIntent":
+        return cls(
+            raw_prompt=str(payload.get("raw_prompt", "")),
+            paper_query=str(payload.get("paper_query", "")),
+            section_hint=(
+                str(payload["section_hint"])
+                if payload.get("section_hint") is not None
+                else None
+            ),
+            section_queries=[str(item) for item in payload.get("section_queries", [])],
+            action_hint=(
+                str(payload["action_hint"])
+                if payload.get("action_hint") is not None
+                else None
+            ),
+        )
+
 
 @dataclass
 class ArxivPaper:

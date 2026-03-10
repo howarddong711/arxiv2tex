@@ -14,10 +14,15 @@ from .latex import (
     strip_appendix,
     strip_comments,
 )
-from .matching import STOPWORDS, normalize_text, rerank_papers
-from .query import expand_section_queries, extract_arxiv_id, parse_prompt_intent
+from .matching import STOPWORDS, normalize_text, rerank_papers, score_title_match
+from .query import (
+    expand_section_queries,
+    extract_arxiv_id,
+    extract_title_candidates,
+    parse_prompt_intent,
+)
 from .storage import write_json
-from .types import ArxivPaper
+from .types import ArxivPaper, PromptIntent
 
 
 class PaperService:
@@ -26,7 +31,9 @@ class PaperService:
         self.arxiv = ArxivClient()
         self.pending_ttl_seconds = pending_ttl_seconds
 
-    def resolve(self, prompt: str, max_results: int = 25, session_id: Optional[str] = None) -> Dict[str, object]:
+    def resolve(
+        self, prompt: str, max_results: int = 25, session_id: Optional[str] = None
+    ) -> Dict[str, object]:
         try:
             intent = parse_prompt_intent(prompt)
             arxiv_ref = extract_arxiv_id(prompt)
@@ -34,7 +41,11 @@ class PaperService:
                 arxiv_id, version = arxiv_ref
                 papers = self.arxiv.fetch_by_id(arxiv_id, version)
                 if not papers:
-                    return {"status": "not_found", "query": arxiv_id, "message": "No arXiv paper matched the supplied id."}
+                    return {
+                        "status": "not_found",
+                        "query": arxiv_id,
+                        "message": "No arXiv paper matched the supplied id.",
+                    }
                 paper = papers[0]
                 self._record_aliases(paper, [prompt, arxiv_id, paper.title])
                 self.cache.clear_pending_state(session_id=session_id)
@@ -48,87 +59,176 @@ class PaperService:
                     "cache_key": paper.cache_key,
                 }
 
-            query = intent.paper_query
-            normalized_query = normalize_text(query)
+            query_candidates = extract_title_candidates(prompt) or [intent.paper_query]
+            return self._resolve_from_intent(
+                intent,
+                query_candidates=query_candidates,
+                session_id=session_id,
+                max_results=max_results,
+                alias_source=prompt,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"Failed to resolve paper: {exc}"}
+
+    def resolve_intent(
+        self,
+        paper_query: str,
+        section_hint: Optional[str] = None,
+        action_hint: Optional[str] = None,
+        raw_prompt: Optional[str] = None,
+        max_results: int = 25,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, object]:
+        try:
+            intent = self._structured_intent(
+                paper_query=paper_query,
+                section_hint=section_hint,
+                action_hint=action_hint,
+                raw_prompt=raw_prompt,
+            )
+            query_candidates = extract_title_candidates(paper_query) or [
+                intent.paper_query
+            ]
+            return self._resolve_from_intent(
+                intent,
+                query_candidates=query_candidates,
+                session_id=session_id,
+                max_results=max_results,
+                alias_source=intent.raw_prompt or intent.paper_query,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"status": "error", "message": f"Failed to resolve paper: {exc}"}
+
+    def _resolve_from_intent(
+        self,
+        intent: PromptIntent,
+        query_candidates: List[str],
+        session_id: Optional[str],
+        max_results: int,
+        alias_source: str,
+    ) -> Dict[str, object]:
+        query = intent.paper_query
+
+        for candidate_query in query_candidates:
+            normalized_query = normalize_text(candidate_query)
             cache_key = self.cache.find_by_alias(normalized_query)
             if cache_key:
                 metadata = self.cache.load_metadata(cache_key)
+                cached_title = str(metadata.get("title", ""))
+                score, reasons = score_title_match(candidate_query, cached_title)
+                if not (
+                    any(reason.startswith("exact_title=") for reason in reasons)
+                    or score >= 0.995
+                ):
+                    continue
                 self.cache.clear_pending_state(session_id=session_id)
                 return {
                     "status": "resolved",
                     "mode": "cache",
                     "session_id": session_id,
                     "intent": intent.to_dict(),
-                    "query": query,
+                    "query": candidate_query,
                     "selected": metadata,
                     "cache_key": cache_key,
                 }
 
-            search_queries = self._search_queries(query)
-            candidates: List[ArxivPaper] = []
-            seen = set()
-            for strategy in search_queries:
-                papers = self._search_strategy(strategy, max_results=max_results)
-                for paper in papers:
-                    if paper.cache_key in seen:
-                        continue
-                    seen.add(paper.cache_key)
-                    candidates.append(paper)
+        search_queries: List[str] = []
+        for candidate_query in query_candidates:
+            for strategy in self._search_queries(candidate_query):
+                if strategy not in search_queries:
+                    search_queries.append(strategy)
 
-            ranked = rerank_papers(query, candidates)
-            if not ranked or ranked[0].confidence == "low":
-                return {
-                    "status": "not_found",
-                    "intent": intent.to_dict(),
-                    "query": query,
-                    "message": "No sufficiently similar arXiv paper was found.",
-                    "candidates": [self._candidate_payload(item) for item in ranked[:3]],
-                }
+        candidates: List[ArxivPaper] = []
+        seen = set()
+        for strategy in search_queries:
+            papers = self._search_strategy(strategy, max_results=max_results)
+            for paper in papers:
+                if paper.cache_key in seen:
+                    continue
+                seen.add(paper.cache_key)
+                candidates.append(paper)
 
-            top = ranked[0]
-            if top.confidence == "high":
-                self._record_aliases(top.paper, [prompt, query, top.paper.title])
-                self.cache.clear_pending_state(session_id=session_id)
-                return {
-                    "status": "resolved",
-                    "mode": "title_match",
-                    "session_id": session_id,
-                    "intent": intent.to_dict(),
-                    "query": query,
-                    "selected": top.paper.to_dict(),
-                    "cache_key": top.paper.cache_key,
-                    "score": top.score,
-                    "reasons": top.reasons,
-                }
-
-            pending = {
-                "session_id": session_id,
-                "original_prompt": prompt,
+        primary_query = query_candidates[0]
+        ranked = rerank_papers(primary_query, candidates)
+        if not ranked:
+            return {
+                "status": "not_found",
                 "intent": intent.to_dict(),
-                "query": query,
+                "query": primary_query,
+                "message": "No sufficiently similar arXiv paper was found.",
+                "candidates": [],
+            }
+
+        top = ranked[0]
+        if top.confidence == "low" and not self._should_offer_confirmation(
+            primary_query, ranked
+        ):
+            return {
+                "status": "not_found",
+                "intent": intent.to_dict(),
+                "query": primary_query,
+                "message": "No sufficiently similar arXiv paper was found.",
                 "candidates": [self._candidate_payload(item) for item in ranked[:3]],
             }
-            self.cache.save_pending_state(
-                pending,
-                session_id=session_id,
-                ttl_seconds=self.pending_ttl_seconds,
-            )
+
+        if top.confidence == "high":
+            self._record_aliases(top.paper, [alias_source, query, top.paper.title])
+            self.cache.clear_pending_state(session_id=session_id)
             return {
-                "status": "confirm",
+                "status": "resolved",
+                "mode": "title_match",
                 "session_id": session_id,
                 "intent": intent.to_dict(),
-                "query": query,
-                "message": "Multiple plausible arXiv matches were found. Ask the user to confirm one of them.",
-                "candidates": pending["candidates"],
+                "query": primary_query,
+                "selected": top.paper.to_dict(),
+                "cache_key": top.paper.cache_key,
+                "score": top.score,
+                "reasons": top.reasons,
             }
-        except Exception as exc:  # noqa: BLE001
-            return {"status": "error", "message": f"Failed to resolve paper: {exc}"}
+
+        pending = {
+            "session_id": session_id,
+            "original_prompt": alias_source,
+            "intent": intent.to_dict(),
+            "query": primary_query,
+            "candidates": [self._candidate_payload(item) for item in ranked[:3]],
+        }
+        self.cache.save_pending_state(
+            pending,
+            session_id=session_id,
+            ttl_seconds=self.pending_ttl_seconds,
+        )
+        return {
+            "status": "confirm",
+            "session_id": session_id,
+            "intent": intent.to_dict(),
+            "query": query,
+            "message": "Multiple plausible arXiv matches were found. Ask the user to confirm one of them.",
+            "candidates": pending["candidates"],
+        }
 
     def interpret_prompt(self, prompt: str) -> Dict[str, object]:
         intent = parse_prompt_intent(prompt)
         return {"status": "ok", "intent": intent.to_dict()}
 
-    def handle_prompt(self, prompt: str, session_id: Optional[str] = None) -> Dict[str, object]:
+    def interpret_intent(
+        self,
+        paper_query: str,
+        section_hint: Optional[str] = None,
+        action_hint: Optional[str] = None,
+        raw_prompt: Optional[str] = None,
+    ) -> Dict[str, object]:
+        intent = self._structured_intent(
+            paper_query=paper_query,
+            section_hint=section_hint,
+            action_hint=action_hint,
+            raw_prompt=raw_prompt,
+        )
+        return {"status": "ok", "intent": intent.to_dict()}
+
+    def handle_prompt(
+        self, prompt: str, session_id: Optional[str] = None
+    ) -> Dict[str, object]:
         pending_result = self._maybe_consume_pending(prompt, session_id=session_id)
         if pending_result is not None:
             return pending_result
@@ -141,7 +241,9 @@ class PaperService:
                 "session_id": session_id,
                 "intent": intent.to_dict(),
                 "resolution": resolution,
-                "next_action": "confirm" if resolution["status"] == "confirm" else "stop",
+                "next_action": "confirm"
+                if resolution["status"] == "confirm"
+                else "stop",
             }
 
         preparation = self.prepare(prompt, session_id=session_id)
@@ -168,17 +270,107 @@ class PaperService:
         }
 
         if intent.section_hint:
-            section_result = self.read_section(cache_key, intent.section_hint, view="reader")
+            section_result = self.read_section(
+                cache_key, intent.section_hint, view="reader"
+            )
             payload["section_result"] = section_result
             if section_result["status"] == "ok" and intent.action_hint == "imitate":
                 try:
-                    payload["writing_examples"] = self.extract_writing_examples(cache_key, intent.section_hint, top_k=3, view="reader")
+                    payload["writing_examples"] = self.extract_writing_examples(
+                        cache_key, intent.section_hint, top_k=3, view="reader"
+                    )
                 except FileNotFoundError:
-                    payload["writing_examples"] = self.search(cache_key, intent.section_hint, top_k=3, view="reader")
+                    payload["writing_examples"] = self.search(
+                        cache_key, intent.section_hint, top_k=3, view="reader"
+                    )
 
         return payload
 
-    def select_candidate(self, prompt: str, selection: str, prepare: bool = True, session_id: Optional[str] = None) -> Dict[str, object]:
+    def handle_intent(
+        self,
+        paper_query: str,
+        section_hint: Optional[str] = None,
+        action_hint: Optional[str] = None,
+        raw_prompt: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, object]:
+        intent = self._structured_intent(
+            paper_query=paper_query,
+            section_hint=section_hint,
+            action_hint=action_hint,
+            raw_prompt=raw_prompt,
+        )
+        resolution = self.resolve_intent(
+            paper_query=paper_query,
+            section_hint=section_hint,
+            action_hint=action_hint,
+            raw_prompt=raw_prompt,
+            session_id=session_id,
+        )
+        if resolution["status"] != "resolved":
+            return {
+                "status": resolution["status"],
+                "session_id": session_id,
+                "intent": intent.to_dict(),
+                "resolution": resolution,
+                "next_action": "confirm"
+                if resolution["status"] == "confirm"
+                else "stop",
+            }
+
+        preparation = self.prepare_intent(
+            paper_query=paper_query,
+            section_hint=section_hint,
+            action_hint=action_hint,
+            raw_prompt=raw_prompt,
+            session_id=session_id,
+        )
+        if preparation["status"] != "prepared":
+            return {
+                "status": preparation["status"],
+                "session_id": session_id,
+                "intent": intent.to_dict(),
+                "resolution": resolution,
+                "preparation": preparation,
+                "next_action": "stop",
+            }
+
+        cache_key = str(preparation["cache_key"])
+        overview = self.overview(cache_key)
+        payload = {
+            "status": "ready",
+            "session_id": session_id,
+            "intent": intent.to_dict(),
+            "resolution": resolution,
+            "preparation": preparation,
+            "overview": overview,
+            "next_action": "read",
+        }
+
+        if intent.section_hint:
+            section_result = self.read_section(
+                cache_key, intent.section_hint, view="reader"
+            )
+            payload["section_result"] = section_result
+            if section_result["status"] == "ok" and intent.action_hint == "imitate":
+                try:
+                    payload["writing_examples"] = self.extract_writing_examples(
+                        cache_key, intent.section_hint, top_k=3, view="reader"
+                    )
+                except FileNotFoundError:
+                    payload["writing_examples"] = self.search(
+                        cache_key, intent.section_hint, top_k=3, view="reader"
+                    )
+
+        return payload
+
+    def select_candidate(
+        self,
+        prompt: str,
+        selection: str,
+        prepare: bool = True,
+        session_id: Optional[str] = None,
+    ) -> Dict[str, object]:
         intent = parse_prompt_intent(prompt)
         resolution = self.resolve(prompt, session_id=session_id)
         if resolution["status"] == "resolved":
@@ -226,7 +418,9 @@ class PaperService:
                 expiry = datetime.fromisoformat(str(expires_at))
                 if expiry.tzinfo is None:
                     expiry = expiry.replace(tzinfo=timezone.utc)
-                remaining_seconds = max(0, int((expiry - datetime.now(timezone.utc)).total_seconds()))
+                remaining_seconds = max(
+                    0, int((expiry - datetime.now(timezone.utc)).total_seconds())
+                )
             except ValueError:
                 remaining_seconds = None
         return {
@@ -236,7 +430,9 @@ class PaperService:
             "remaining_seconds": remaining_seconds,
         }
 
-    def extract_writing_examples(self, cache_key: str, target: str, top_k: int = 3, view: str = "reader") -> Dict[str, object]:
+    def extract_writing_examples(
+        self, cache_key: str, target: str, top_k: int = 3, view: str = "reader"
+    ) -> Dict[str, object]:
         aliases = self._writing_target_aliases(target)
         target_profile = self._classify_writing_target(aliases)
         sections = self._sections_for_view(cache_key, view)
@@ -249,7 +445,9 @@ class PaperService:
                 matched_sections.append(section)
 
         scored = self._score_snippets(snippets, aliases, matched_sections)
-        examples = [{**snippet, "score": round(score, 4)} for score, snippet in scored[:top_k]]
+        examples = [
+            {**snippet, "score": round(score, 4)} for score, snippet in scored[:top_k]
+        ]
 
         try:
             metadata = self.cache.load_metadata(cache_key)
@@ -285,13 +483,20 @@ class PaperService:
             "guidance": self._writing_guidance(target_profile, style_signals),
         }
 
-    def prepare(self, prompt: str, view: str = "reader", session_id: Optional[str] = None) -> Dict[str, object]:
+    def prepare(
+        self, prompt: str, view: str = "reader", session_id: Optional[str] = None
+    ) -> Dict[str, object]:
         resolved = self.resolve(prompt, session_id=session_id)
         if resolved["status"] != "resolved":
             return resolved
 
         selected = resolved["selected"]
         paper = self._paper_from_dict(selected)
+        return self._prepare_paper(paper, view=view, session_id=session_id)
+
+    def _prepare_paper(
+        self, paper: ArxivPaper, view: str = "reader", session_id: Optional[str] = None
+    ) -> Dict[str, object]:
 
         paper_dir = self.cache.paper_dir(paper.cache_key)
         source_archive = paper_dir / "source.tar"
@@ -325,7 +530,11 @@ class PaperService:
                 sections = build_sections(reader_tex)
                 snippets = build_snippets(reader_tex, sections)
             except Exception as exc:  # noqa: BLE001
-                return {"status": "error", "message": f"Failed to prepare paper source: {exc}", "cache_key": paper.cache_key}
+                return {
+                    "status": "error",
+                    "message": f"Failed to prepare paper source: {exc}",
+                    "cache_key": paper.cache_key,
+                }
 
             paper_dir.mkdir(parents=True, exist_ok=True)
             self.cache.save_metadata(paper)
@@ -373,6 +582,28 @@ class PaperService:
             "metadata": self.cache.load_metadata(paper.cache_key),
         }
 
+    def prepare_intent(
+        self,
+        paper_query: str,
+        section_hint: Optional[str] = None,
+        action_hint: Optional[str] = None,
+        raw_prompt: Optional[str] = None,
+        view: str = "reader",
+        session_id: Optional[str] = None,
+    ) -> Dict[str, object]:
+        resolved = self.resolve_intent(
+            paper_query=paper_query,
+            section_hint=section_hint,
+            action_hint=action_hint,
+            raw_prompt=raw_prompt,
+            session_id=session_id,
+        )
+        if resolved["status"] != "resolved":
+            return resolved
+        selected = resolved["selected"]
+        paper = self._paper_from_dict(selected)
+        return self._prepare_paper(paper, view=view, session_id=session_id)
+
     def overview(self, cache_key: str) -> Dict[str, object]:
         paper_dir = self.cache.paper_dir(cache_key)
         metadata = self.cache.load_metadata(cache_key)
@@ -389,10 +620,14 @@ class PaperService:
             "manifest": manifest,
             "views": self._available_views(cache_key),
             "sections": sections,
-            "section_tree": build_section_tree([self._section_from_dict(section) for section in sections]),
+            "section_tree": build_section_tree(
+                [self._section_from_dict(section) for section in sections]
+            ),
         }
 
-    def search(self, cache_key: str, query: str, top_k: int = 5, view: str = "reader") -> Dict[str, object]:
+    def search(
+        self, cache_key: str, query: str, top_k: int = 5, view: str = "reader"
+    ) -> Dict[str, object]:
         snippets = self._snippets_for_view(cache_key, view)
         query_terms = [query] + expand_section_queries(query)
         query_tokens = []
@@ -408,7 +643,11 @@ class PaperService:
                 continue
             score = hit_count / max(1, len(query_tokens))
             normalized_section = normalize_text(snippet.get("section_title") or "")
-            if any(normalize_text(term) in normalized_section for term in query_terms if term):
+            if any(
+                normalize_text(term) in normalized_section
+                for term in query_terms
+                if term
+            ):
                 score += 0.2
             scored.append((score, snippet))
         scored.sort(key=lambda item: item[0], reverse=True)
@@ -416,11 +655,14 @@ class PaperService:
             "status": "ok",
             "view": view,
             "results": [
-                {**snippet, "score": round(score, 4)} for score, snippet in scored[:top_k]
+                {**snippet, "score": round(score, 4)}
+                for score, snippet in scored[:top_k]
             ],
         }
 
-    def read_section(self, cache_key: str, section_ref: str, view: str = "reader") -> Dict[str, object]:
+    def read_section(
+        self, cache_key: str, section_ref: str, view: str = "reader"
+    ) -> Dict[str, object]:
         sections = self._sections_for_view(cache_key, view)
         text = self._read_view(cache_key, view)
         aliases = expand_section_queries(section_ref)
@@ -434,21 +676,38 @@ class PaperService:
                     "section": section,
                     "text": text[section["start_offset"] : section["end_offset"]],
                 }
-        return {"status": "not_found", "message": f"No section matched '{section_ref}'."}
+        return {
+            "status": "not_found",
+            "message": f"No section matched '{section_ref}'.",
+        }
 
-    def read_fulltex(self, cache_key: str, offset: int = 0, limit: int = 4000, view: str = "reader") -> Dict[str, object]:
+    def read_fulltex(
+        self, cache_key: str, offset: int = 0, limit: int = 4000, view: str = "reader"
+    ) -> Dict[str, object]:
         text = self._read_view(cache_key, view)
         end = min(len(text), offset + limit)
-        return {"status": "ok", "view": view, "offset": offset, "end": end, "text": text[offset:end]}
+        return {
+            "status": "ok",
+            "view": view,
+            "offset": offset,
+            "end": end,
+            "text": text[offset:end],
+        }
 
     def _search_strategy(self, query: str, max_results: int) -> List[ArxivPaper]:
-        tokens = [token for token in normalize_text(query).split(" ") if token and token not in STOPWORDS]
+        tokens = [
+            token
+            for token in normalize_text(query).split(" ")
+            if token and token not in STOPWORDS
+        ]
         candidates: List[ArxivPaper] = []
         seen = set()
 
         fetchers = [
             lambda: self.arxiv.search_title(query, max_results=min(max_results, 10)),
-            lambda: self.arxiv.search_title_tokens(tokens[:6], max_results=min(max_results, 12)),
+            lambda: self.arxiv.search_title_tokens(
+                tokens[:6], max_results=min(max_results, 12)
+            ),
             lambda: self.arxiv.search_all(query, max_results=min(max_results, 12)),
         ]
 
@@ -467,8 +726,30 @@ class PaperService:
         return candidates
 
     def _record_aliases(self, paper: ArxivPaper, aliases: List[str]) -> None:
-        normalized = [normalize_text(alias) for alias in aliases if normalize_text(alias)]
-        normalized.append(normalize_text(paper.title))
+        normalized: List[str] = []
+        title_aliases = {
+            normalize_text(paper.title),
+            normalize_text(paper.arxiv_id),
+            normalize_text(paper.cache_key),
+            normalize_text(f"{paper.arxiv_id}{paper.version}"),
+        }
+
+        for alias in aliases:
+            alias_norm = normalize_text(alias)
+            if not alias_norm:
+                continue
+            if alias_norm in title_aliases:
+                normalized.append(alias_norm)
+                continue
+
+            score, reasons = score_title_match(alias, paper.title)
+            if (
+                any(reason.startswith("exact_title=") for reason in reasons)
+                or score >= 0.995
+            ):
+                normalized.append(alias_norm)
+
+        normalized.extend(title_aliases)
         self.cache.save_aliases(paper.cache_key, normalized)
         if not (self.cache.paper_dir(paper.cache_key) / "metadata.json").exists():
             self.cache.save_metadata(paper)
@@ -499,7 +780,38 @@ class PaperService:
             "summary_preview": summary_sentence[:240],
         }
 
-    def _match_candidate_selection(self, candidates: List[Dict[str, object]], selection: str) -> Optional[Dict[str, object]]:
+    def _should_offer_confirmation(self, query: str, ranked) -> bool:
+        normalized = normalize_text(query)
+        if not normalized or not ranked:
+            return False
+        tokens = [token for token in normalized.split(" ") if token]
+        top_score = ranked[0].score
+        has_ascii_or_digit = any(
+            any(char.isascii() and char.isalnum() for char in token) for token in tokens
+        )
+        is_short_query = len(tokens) <= 4 and len(normalized) <= 32
+        return top_score >= 0.45 and (has_ascii_or_digit or is_short_query)
+
+    def _structured_intent(
+        self,
+        paper_query: str,
+        section_hint: Optional[str],
+        action_hint: Optional[str],
+        raw_prompt: Optional[str],
+    ) -> PromptIntent:
+        intent = PromptIntent(
+            raw_prompt=raw_prompt or paper_query,
+            paper_query=paper_query.strip(),
+            section_hint=section_hint.strip() if section_hint else None,
+            section_queries=[],
+            action_hint=action_hint.strip() if action_hint else None,
+        )
+        intent.section_queries = expand_section_queries(intent.section_hint)
+        return intent
+
+    def _match_candidate_selection(
+        self, candidates: List[Dict[str, object]], selection: str
+    ) -> Optional[Dict[str, object]]:
         cleaned = self._canonicalize_selection_text(selection)
         if not cleaned:
             return None
@@ -526,7 +838,11 @@ class PaperService:
         normalized = normalize_text(cleaned)
         for candidate in candidates:
             paper = candidate["paper"]
-            if normalized == normalize_text(paper["arxiv_id"]) or normalized == normalize_text(f"{paper['arxiv_id']}{paper.get('version', '')}"):
+            if normalized == normalize_text(
+                paper["arxiv_id"]
+            ) or normalized == normalize_text(
+                f"{paper['arxiv_id']}{paper.get('version', '')}"
+            ):
                 return candidate
         for candidate in candidates:
             paper = candidate["paper"]
@@ -547,7 +863,9 @@ class PaperService:
         selected = view if view in allowed else "reader"
         path = self.cache.paper_dir(cache_key) / f"{selected}.tex"
         if not path.exists():
-            raise FileNotFoundError(f"View '{selected}' is not available for {cache_key}.")
+            raise FileNotFoundError(
+                f"View '{selected}' is not available for {cache_key}."
+            )
         return path.read_text(encoding="utf-8")
 
     def _sections_for_view(self, cache_key: str, view: str) -> List[Dict[str, object]]:
@@ -581,7 +899,10 @@ class PaperService:
         }
         for key, values in extras.items():
             normalized_key = normalize_text(key)
-            if normalized_target == normalized_key or normalized_key in normalized_target:
+            if (
+                normalized_target == normalized_key
+                or normalized_key in normalized_target
+            ):
                 for value in values:
                     if value not in aliases:
                         aliases.append(value)
@@ -595,9 +916,18 @@ class PaperService:
             return "abstract"
         if "related work" in normalized or "background" in normalized:
             return "related_work"
-        if "method" in normalized or "methods" in normalized or "approach" in normalized:
+        if (
+            "method" in normalized
+            or "methods" in normalized
+            or "approach" in normalized
+        ):
             return "method"
-        if "experiment" in normalized or "experiments" in normalized or "evaluation" in normalized or "results" in normalized:
+        if (
+            "experiment" in normalized
+            or "experiments" in normalized
+            or "evaluation" in normalized
+            or "results" in normalized
+        ):
             return "experiment"
         if "conclusion" in normalized or "discussion" in normalized:
             return "conclusion"
@@ -609,7 +939,9 @@ class PaperService:
         query_terms: List[str],
         matched_sections: List[Dict[str, object]],
     ) -> List[tuple]:
-        matched_titles = {normalize_text(section["title"]) for section in matched_sections}
+        matched_titles = {
+            normalize_text(section["title"]) for section in matched_sections
+        }
         query_tokens: List[str] = []
         for term in query_terms:
             for token in normalize_text(term).split(" "):
@@ -632,13 +964,17 @@ class PaperService:
         scored.sort(key=lambda item: item[0], reverse=True)
         return scored
 
-    def _starter_sentences(self, examples: List[Dict[str, object]], limit: int = 3) -> List[str]:
+    def _starter_sentences(
+        self, examples: List[Dict[str, object]], limit: int = 3
+    ) -> List[str]:
         starters: List[str] = []
         for example in examples:
             text = str(example.get("text", "")).strip()
             if not text:
                 continue
-            sentence = re.split(r"(?<=[.!?])\s+|(?<=[。！？])", text, maxsplit=1)[0].strip()
+            sentence = re.split(r"(?<=[.!?])\s+|(?<=[。！？])", text, maxsplit=1)[
+                0
+            ].strip()
             sentence = re.sub(r"\s+", " ", sentence)
             if len(sentence) < 12:
                 continue
@@ -650,9 +986,17 @@ class PaperService:
 
     def _style_signals(self, examples: List[Dict[str, object]]) -> Dict[str, object]:
         joined = "\n".join(str(example.get("text", "")) for example in examples)
-        citation_hits = len(re.findall(r"\\cite\{|\\citet\{|\\citep\{|(?:\[\d+(?:,\s*\d+)*\])", joined))
-        figure_hits = len(re.findall(r"\b(?:fig(?:ure)?\.?\s*\d+|table\s*\d+)\b", joined, flags=re.IGNORECASE))
-        equation_hits = len(re.findall(r"\b(?:eq(?:uation)?\.?\s*\d+)\b", joined, flags=re.IGNORECASE))
+        citation_hits = len(
+            re.findall(r"\\cite\{|\\citet\{|\\citep\{|(?:\[\d+(?:,\s*\d+)*\])", joined)
+        )
+        figure_hits = len(
+            re.findall(
+                r"\b(?:fig(?:ure)?\.?\s*\d+|table\s*\d+)\b", joined, flags=re.IGNORECASE
+            )
+        )
+        equation_hits = len(
+            re.findall(r"\b(?:eq(?:uation)?\.?\s*\d+)\b", joined, flags=re.IGNORECASE)
+        )
         sentence_count = max(1, len(re.findall(r"[.!?。！？]+", joined)))
         token_count = max(1, len(joined.split()))
         return {
@@ -662,7 +1006,9 @@ class PaperService:
             "avg_tokens_per_sentence": round(token_count / sentence_count, 1),
         }
 
-    def _writing_guidance(self, target_profile: str, style_signals: Dict[str, object]) -> List[str]:
+    def _writing_guidance(
+        self, target_profile: str, style_signals: Dict[str, object]
+    ) -> List[str]:
         guidance_map = {
             "abstract": [
                 "Open with the problem or task, then state the proposed method and the main quantitative result.",
@@ -690,9 +1036,13 @@ class PaperService:
         }
         guidance = list(guidance_map.get(target_profile, guidance_map["general"]))
         if style_signals.get("citation_hits", 0) >= 2:
-            guidance.append("This section style leans on explicit citations, so keep related claims attached to references.")
+            guidance.append(
+                "This section style leans on explicit citations, so keep related claims attached to references."
+            )
         if style_signals.get("figure_hits", 0) or style_signals.get("equation_hits", 0):
-            guidance.append("The examples frequently point to figures, tables, or equations; preserve those anchors near the claim they support.")
+            guidance.append(
+                "The examples frequently point to figures, tables, or equations; preserve those anchors near the claim they support."
+            )
         return guidance
 
     def _section_from_dict(self, payload: Dict[str, object]):
@@ -721,7 +1071,9 @@ class PaperService:
             source_url=str(payload.get("source_url", "")),
         )
 
-    def _maybe_consume_pending(self, prompt: str, session_id: Optional[str] = None) -> Optional[Dict[str, object]]:
+    def _maybe_consume_pending(
+        self, prompt: str, session_id: Optional[str] = None
+    ) -> Optional[Dict[str, object]]:
         pending = self.cache.load_pending_state(session_id=session_id)
         if not pending:
             return None
@@ -730,17 +1082,26 @@ class PaperService:
         if not selection:
             return None
 
-        selected = self._match_candidate_selection(pending.get("candidates", []), selection)
+        selected = self._match_candidate_selection(
+            pending.get("candidates", []), selection
+        )
         if not selected:
             return None
 
         paper = self._paper_from_dict(selected["paper"])
-        intent = pending.get("intent") or parse_prompt_intent(pending.get("original_prompt", prompt)).to_dict()
+        intent = (
+            pending.get("intent")
+            or parse_prompt_intent(pending.get("original_prompt", prompt)).to_dict()
+        )
         original_prompt = str(pending.get("original_prompt", prompt))
-        self._record_aliases(paper, [original_prompt, str(intent.get("paper_query", "")), paper.title])
+        self._record_aliases(
+            paper, [original_prompt, str(intent.get("paper_query", "")), paper.title]
+        )
         self.cache.clear_pending_state(session_id=session_id)
 
-        preparation = self.prepare(paper.abs_url or paper.arxiv_id, session_id=session_id)
+        preparation = self.prepare(
+            paper.abs_url or paper.arxiv_id, session_id=session_id
+        )
         if preparation["status"] != "prepared":
             return {
                 "status": preparation["status"],
@@ -776,13 +1137,19 @@ class PaperService:
         section_hint = intent.get("section_hint")
         action_hint = intent.get("action_hint")
         if section_hint:
-            section_result = self.read_section(cache_key, str(section_hint), view="reader")
+            section_result = self.read_section(
+                cache_key, str(section_hint), view="reader"
+            )
             payload["section_result"] = section_result
             if section_result["status"] == "ok" and action_hint == "imitate":
                 try:
-                    payload["writing_examples"] = self.extract_writing_examples(cache_key, str(section_hint), top_k=3, view="reader")
+                    payload["writing_examples"] = self.extract_writing_examples(
+                        cache_key, str(section_hint), top_k=3, view="reader"
+                    )
                 except FileNotFoundError:
-                    payload["writing_examples"] = self.search(cache_key, str(section_hint), top_k=3, view="reader")
+                    payload["writing_examples"] = self.search(
+                        cache_key, str(section_hint), top_k=3, view="reader"
+                    )
         return payload
 
     def _normalize_selection_input(self, prompt: str) -> Optional[str]:

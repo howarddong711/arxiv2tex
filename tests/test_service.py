@@ -1,6 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
+from arxiv2tex.matching import normalize_text
 from arxiv2tex.service import PaperService
 from arxiv2tex.types import ArxivPaper
 
@@ -38,14 +39,18 @@ def test_confirm_does_not_write_alias_cache(tmp_path: Path):
 
     assert result["status"] == "confirm"
     assert result["candidates"][0]["first_author"] == "First Author"
-    assert not (tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1" / "aliases.json").exists()
+    assert not (
+        tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1" / "aliases.json"
+    ).exists()
 
 
 def test_read_section_supports_cn_alias(tmp_path: Path):
     service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper_dir = service.cache.paper_dir("demo")
     paper_dir.mkdir(parents=True, exist_ok=True)
-    (paper_dir / "reader.tex").write_text("\\section{Results}\nExperiments here.\n", encoding="utf-8")
+    (paper_dir / "reader.tex").write_text(
+        "\\section{Results}\nExperiments here.\n", encoding="utf-8"
+    )
 
     result = service.read_section("demo", "实验")
 
@@ -70,7 +75,9 @@ def test_select_candidate_by_ordinal_without_prepare(tmp_path: Path):
         "candidates": [candidate],
     }
 
-    result = service.select_candidate("帮我看 attention all you need", "第一个", prepare=False)
+    result = service.select_candidate(
+        "帮我看 attention all you need", "第一个", prepare=False
+    )
 
     assert result["status"] == "resolved"
     assert result["mode"] == "confirmed_candidate"
@@ -91,14 +98,25 @@ def test_handle_prompt_returns_section_result(tmp_path: Path):
         "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
         "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
     }
-    service.overview = lambda cache_key: {"status": "ok", "sections": [{"title": "Results"}]}  # type: ignore[assignment]
+    service.overview = lambda cache_key: {
+        "status": "ok",
+        "sections": [{"title": "Results"}],
+    }  # type: ignore[assignment]
     service.read_section = lambda cache_key, section_ref, view="reader": {  # type: ignore[assignment]
         "status": "ok",
         "section": {"title": "Results"},
         "text": "Experiments here.",
     }
-    service.search = lambda cache_key, query, top_k=3, view="reader": {"status": "ok", "results": [{"snippet_id": "results-000"}]}  # type: ignore[assignment]
-    service.extract_writing_examples = lambda cache_key, target, top_k=3, view="reader": {"status": "ok", "examples": [{"snippet_id": "results-000"}]}  # type: ignore[assignment]
+    service.search = lambda cache_key, query, top_k=3, view="reader": {
+        "status": "ok",
+        "results": [{"snippet_id": "results-000"}],
+    }  # type: ignore[assignment]
+    service.extract_writing_examples = (
+        lambda cache_key, target, top_k=3, view="reader": {
+            "status": "ok",
+            "examples": [{"snippet_id": "results-000"}],
+        }
+    )  # type: ignore[assignment]
 
     result = service.handle_prompt("帮我参考 attention is all you need 的实验部分写法")
 
@@ -106,6 +124,119 @@ def test_handle_prompt_returns_section_result(tmp_path: Path):
     assert result["intent"]["section_hint"] == "实验"
     assert result["section_result"]["section"]["title"] == "Results"
     assert result["writing_examples"]["examples"][0]["snippet_id"] == "results-000"
+
+
+def test_resolve_short_acronym_query_returns_confirmation(tmp_path: Path):
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
+    papers = [
+        make_paper("1601.07303", "Periodic GMP Matrices"),
+        make_paper("2206.08975", "Vibrational Levels of a Generalized Morse Potential"),
+    ]
+    service.arxiv.search_title = lambda query, max_results=10: papers  # type: ignore[assignment]
+    service.arxiv.search_title_tokens = lambda tokens, max_results=12: []  # type: ignore[assignment]
+    service.arxiv.search_all = lambda query, max_results=12: []  # type: ignore[assignment]
+
+    result = service.resolve("你学习一下GMP这篇论文附录里表格的写法")
+
+    assert result["status"] == "confirm"
+    assert result["query"] == "GMP"
+    assert result["candidates"]
+
+
+def test_resolve_intent_uses_structured_query_without_text_parse(tmp_path: Path):
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
+    paper = make_paper("1706.03762", "Attention Is All You Need")
+    service.arxiv.search_title = lambda query, max_results=10: [paper]  # type: ignore[assignment]
+    service.arxiv.search_title_tokens = lambda tokens, max_results=12: []  # type: ignore[assignment]
+    service.arxiv.search_all = lambda query, max_results=12: []  # type: ignore[assignment]
+
+    result = service.resolve_intent(
+        paper_query="Attention Is All You Need",
+        section_hint="related work",
+        action_hint="imitate",
+        raw_prompt="看看这篇论文 related work 怎么组织的",
+    )
+
+    assert result["status"] == "resolved"
+    assert result["intent"]["paper_query"] == "Attention Is All You Need"
+    assert result["intent"]["section_hint"] == "related work"
+
+
+def test_handle_intent_returns_section_result(tmp_path: Path):
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
+    service.resolve_intent = lambda **kwargs: {  # type: ignore[assignment]
+        "status": "resolved",
+        "mode": "title_match",
+        "selected": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
+        "cache_key": "1706.03762v1",
+        "intent": {
+            "raw_prompt": "看看这篇论文 related work 怎么组织的",
+            "paper_query": "Attention Is All You Need",
+            "section_hint": "related work",
+            "section_queries": ["related work", "background"],
+            "action_hint": "imitate",
+        },
+    }
+    service.prepare_intent = lambda **kwargs: {  # type: ignore[assignment]
+        "status": "prepared",
+        "cache_key": "1706.03762v1",
+        "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
+        "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
+    }
+    service.overview = lambda cache_key: {
+        "status": "ok",
+        "sections": [{"title": "Background"}],
+    }  # type: ignore[assignment]
+    service.read_section = lambda cache_key, section_ref, view="reader": {  # type: ignore[assignment]
+        "status": "ok",
+        "section": {"title": "Background"},
+        "text": "Prior work here.",
+    }
+    service.extract_writing_examples = (
+        lambda cache_key, target, top_k=3, view="reader": {  # type: ignore[assignment]
+            "status": "ok",
+            "examples": [{"snippet_id": "background-000"}],
+        }
+    )
+
+    result = service.handle_intent(
+        paper_query="Attention Is All You Need",
+        section_hint="related work",
+        action_hint="imitate",
+        raw_prompt="看看这篇论文 related work 怎么组织的",
+    )
+
+    assert result["status"] == "ready"
+    assert result["intent"]["paper_query"] == "Attention Is All You Need"
+    assert result["section_result"]["section"]["title"] == "Background"
+    assert result["writing_examples"]["examples"][0]["snippet_id"] == "background-000"
+
+
+def test_prepare_intent_uses_selected_paper_directly(tmp_path: Path):
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
+    paper = make_paper("1706.03762", "Attention Is All You Need")
+    service.resolve_intent = lambda **kwargs: {  # type: ignore[assignment]
+        "status": "resolved",
+        "selected": paper.to_dict(),
+    }
+
+    sentinel = {
+        "status": "prepared",
+        "cache_key": paper.cache_key,
+        "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / paper.cache_key),
+        "default_view": "reader",
+        "metadata": paper.to_dict(),
+    }
+    service._prepare_paper = lambda selected, view="reader", session_id=None: sentinel  # type: ignore[assignment]
+
+    result = service.prepare_intent(
+        paper_query="Attention Is All You Need",
+        section_hint="related work",
+        action_hint="imitate",
+        raw_prompt="看看这篇论文 related work 怎么组织的",
+    )
+
+    assert result == sentinel
 
 
 def test_resolve_confirm_persists_pending_state(tmp_path: Path):
@@ -141,7 +272,9 @@ def test_handle_prompt_consumes_pending_selection(tmp_path: Path):
             "query": "attention is all you need",
             "candidates": [
                 {
-                    "paper": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
+                    "paper": make_paper(
+                        "1706.03762", "Attention Is All You Need"
+                    ).to_dict(),
                     "score": 0.91,
                     "confidence": "medium",
                     "reasons": ["strong_coverage=1.00"],
@@ -158,14 +291,25 @@ def test_handle_prompt_consumes_pending_selection(tmp_path: Path):
         "paper_dir": str(tmp_path / CACHE_DIR_NAME / "arxiv" / "1706.03762v1"),
         "metadata": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
     }
-    service.overview = lambda cache_key: {"status": "ok", "sections": [{"title": "Results"}]}  # type: ignore[assignment]
+    service.overview = lambda cache_key: {
+        "status": "ok",
+        "sections": [{"title": "Results"}],
+    }  # type: ignore[assignment]
     service.read_section = lambda cache_key, section_ref, view="reader": {  # type: ignore[assignment]
         "status": "ok",
         "section": {"title": "Results"},
         "text": "Experiments here.",
     }
-    service.search = lambda cache_key, query, top_k=3, view="reader": {"status": "ok", "results": [{"snippet_id": "results-000"}]}  # type: ignore[assignment]
-    service.extract_writing_examples = lambda cache_key, target, top_k=3, view="reader": {"status": "ok", "examples": [{"snippet_id": "results-000"}]}  # type: ignore[assignment]
+    service.search = lambda cache_key, query, top_k=3, view="reader": {
+        "status": "ok",
+        "results": [{"snippet_id": "results-000"}],
+    }  # type: ignore[assignment]
+    service.extract_writing_examples = (
+        lambda cache_key, target, top_k=3, view="reader": {
+            "status": "ok",
+            "examples": [{"snippet_id": "results-000"}],
+        }
+    )  # type: ignore[assignment]
 
     result = service.handle_prompt("就这篇")
 
@@ -189,7 +333,9 @@ def test_handle_prompt_accepts_casual_selection_phrase(tmp_path: Path):
             "query": "attention all you need",
             "candidates": [
                 {
-                    "paper": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
+                    "paper": make_paper(
+                        "1706.03762", "Attention Is All You Need"
+                    ).to_dict(),
                     "score": 0.91,
                     "confidence": "medium",
                     "reasons": ["strong_coverage=1.00"],
@@ -216,8 +362,32 @@ def test_handle_prompt_accepts_casual_selection_phrase(tmp_path: Path):
 
 def test_pending_state_is_isolated_by_session(tmp_path: Path):
     service = PaperService(tmp_path / CACHE_DIR_NAME)
-    service.cache.save_pending_state({"session_id": "alpha", "candidates": [{"paper": make_paper("1706.03762", "Attention Is All You Need").to_dict()}]}, session_id="alpha")
-    service.cache.save_pending_state({"session_id": "beta", "candidates": [{"paper": make_paper("2307.12775", "Medical Attention Review").to_dict()}]}, session_id="beta")
+    service.cache.save_pending_state(
+        {
+            "session_id": "alpha",
+            "candidates": [
+                {
+                    "paper": make_paper(
+                        "1706.03762", "Attention Is All You Need"
+                    ).to_dict()
+                }
+            ],
+        },
+        session_id="alpha",
+    )
+    service.cache.save_pending_state(
+        {
+            "session_id": "beta",
+            "candidates": [
+                {
+                    "paper": make_paper(
+                        "2307.12775", "Medical Attention Review"
+                    ).to_dict()
+                }
+            ],
+        },
+        session_id="beta",
+    )
 
     alpha = service.pending_status(session_id="alpha")
     beta = service.pending_status(session_id="beta")
@@ -244,7 +414,9 @@ def test_handle_prompt_consumes_only_requested_session(tmp_path: Path):
             "query": "attention all you need",
             "candidates": [
                 {
-                    "paper": make_paper("1706.03762", "Attention Is All You Need").to_dict(),
+                    "paper": make_paper(
+                        "1706.03762", "Attention Is All You Need"
+                    ).to_dict(),
                     "score": 0.91,
                     "confidence": "medium",
                     "reasons": ["strong_coverage=1.00"],
@@ -270,7 +442,9 @@ def test_handle_prompt_consumes_only_requested_session(tmp_path: Path):
             "query": "another paper",
             "candidates": [
                 {
-                    "paper": make_paper("2307.12775", "Medical Attention Review").to_dict(),
+                    "paper": make_paper(
+                        "2307.12775", "Medical Attention Review"
+                    ).to_dict(),
                     "score": 0.91,
                     "confidence": "medium",
                     "reasons": ["strong_coverage=1.00"],
@@ -342,7 +516,9 @@ def test_extract_writing_examples_abstract_fallback(tmp_path: Path):
     paper = make_paper("1706.03762", "Attention Is All You Need")
     paper_dir = service.cache.paper_dir(paper.cache_key)
     paper_dir.mkdir(parents=True, exist_ok=True)
-    (paper_dir / "reader.tex").write_text("\\section{Introduction}\nIntro text.\n", encoding="utf-8")
+    (paper_dir / "reader.tex").write_text(
+        "\\section{Introduction}\nIntro text.\n", encoding="utf-8"
+    )
     service.cache.save_metadata(paper)
 
     result = service.extract_writing_examples(paper.cache_key, "摘要", top_k=1)
@@ -372,6 +548,26 @@ def test_extract_writing_examples_reports_style_signals(tmp_path: Path):
     assert result["guidance"]
 
 
+def test_record_aliases_skips_ambiguous_short_title_for_longer_paper(tmp_path: Path):
+    service = PaperService(tmp_path / CACHE_DIR_NAME)
+    review = make_paper(
+        "2307.12775", "Is attention all you need in medical image analysis? A review"
+    )
+
+    service._record_aliases(  # type: ignore[attr-defined]
+        review,
+        [
+            "看看《Attention Is All You Need》这篇论文的 related work 怎么组织的",
+            "Attention Is All You Need",
+            review.title,
+        ],
+    )
+
+    aliases = service.cache.load_aliases(review.cache_key)
+    assert normalize_text(review.title) in aliases
+    assert normalize_text("Attention Is All You Need") not in aliases
+
+
 def test_prepare_rebuilds_indexes_without_redownloading(tmp_path: Path):
     service = PaperService(tmp_path / CACHE_DIR_NAME)
     paper = make_paper("1706.03762", "Attention Is All You Need")
@@ -379,10 +575,19 @@ def test_prepare_rebuilds_indexes_without_redownloading(tmp_path: Path):
     source_dir = paper_dir / "source"
     source_dir.mkdir(parents=True, exist_ok=True)
     (paper_dir / "source.tar").write_text("cached", encoding="utf-8")
-    (paper_dir / "manifest.json").write_text('{"entrypoint": "main.tex", "tex_files": [], "bib_files": [], "asset_files": [], "includes": {}}', encoding="utf-8")
-    (paper_dir / "full.tex").write_text("\\section{Results}\nResult sentence.\n", encoding="utf-8")
-    (paper_dir / "clean.tex").write_text("\\section{Results}\nResult sentence.\n", encoding="utf-8")
-    (paper_dir / "reader.tex").write_text("\\section{Results}\nResult sentence.\n", encoding="utf-8")
+    (paper_dir / "manifest.json").write_text(
+        '{"entrypoint": "main.tex", "tex_files": [], "bib_files": [], "asset_files": [], "includes": {}}',
+        encoding="utf-8",
+    )
+    (paper_dir / "full.tex").write_text(
+        "\\section{Results}\nResult sentence.\n", encoding="utf-8"
+    )
+    (paper_dir / "clean.tex").write_text(
+        "\\section{Results}\nResult sentence.\n", encoding="utf-8"
+    )
+    (paper_dir / "reader.tex").write_text(
+        "\\section{Results}\nResult sentence.\n", encoding="utf-8"
+    )
 
     service.resolve = lambda prompt, max_results=25, session_id=None: {  # type: ignore[assignment]
         "status": "resolved",
@@ -390,8 +595,12 @@ def test_prepare_rebuilds_indexes_without_redownloading(tmp_path: Path):
         "selected": paper.to_dict(),
         "cache_key": paper.cache_key,
     }
-    service.arxiv.download_source = lambda paper, destination: (_ for _ in ()).throw(AssertionError("download_source should not be called"))  # type: ignore[assignment]
-    service.arxiv.extract_source = lambda archive, destination: (_ for _ in ()).throw(AssertionError("extract_source should not be called"))  # type: ignore[assignment]
+    service.arxiv.download_source = lambda paper, destination: (_ for _ in ()).throw(
+        AssertionError("download_source should not be called")
+    )  # type: ignore[assignment]
+    service.arxiv.extract_source = lambda archive, destination: (_ for _ in ()).throw(
+        AssertionError("extract_source should not be called")
+    )  # type: ignore[assignment]
 
     result = service.prepare("attention is all you need")
 
