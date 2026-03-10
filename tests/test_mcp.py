@@ -19,5 +19,8 @@ def test_mcp_server_registers_expected_tools():
     tool_names = {tool.name for tool in asyncio.run(server.list_tools())}
 
     assert "arxiv2tex_handle_prompt" in tool_names
+    assert "arxiv2tex_handle_intent" in tool_names
+    assert "arxiv2tex_resolve_intent" in tool_names
+    assert "arxiv2tex_prepare_intent" in tool_names
     assert "arxiv2tex_extract_writing" in tool_names
-    assert len(tool_names) == 11
+    assert len(tool_names) == 15
