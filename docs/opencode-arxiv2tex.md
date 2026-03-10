@@ -2,6 +2,12 @@
 
 When the user asks to read or imitate an arXiv paper, use the `arxiv2tex` MCP tools instead of browsing raw PDFs.
 
+Hard routing rule (non-optional):
+
+- For any request that asks to read, learn, summarize, explain, or imitate a paper/article (including short prompts like `学习 ...`, `介绍一下这篇论文 ...`, `read this paper ...`), call `arxiv2tex` tools first.
+- Do NOT answer paper content directly from general web search when arxiv2tex is available.
+- If paper resolution is ambiguous, return `confirm` candidates and ask for selection; do not silently switch to a web-only answer.
+
 Preferred workflow (agent parses user prompt first):
 
 1. Parse the user's message with your own reasoning and extract structured fields: `paper_query`, optional `section_hint`, optional `action_hint`.
