@@ -12,7 +12,8 @@ DEFAULT_CACHE_ROOT = Path(os.environ.get("ARXIV2TEX_CACHE_ROOT", ".arxiv2tex-cac
 SERVER_INSTRUCTIONS = (
     "Use arxiv2tex tools to resolve arXiv papers from natural-language prompts, "
     "prepare cached TeX views, and retrieve sections or writing-oriented examples "
-    "without loading whole papers into context."
+    "without loading whole papers into context. For paper reading/summarization/learning requests, "
+    "call arxiv2tex tools first and do not answer directly from generic web search when arxiv2tex is available."
 )
 
 
