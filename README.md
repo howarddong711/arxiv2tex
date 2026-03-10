@@ -124,7 +124,7 @@ Cached view files:
 
 ## OpenCode
 
-This repository now includes a project-level [opencode.json](/E:/code/paper2tex/opencode.json) that registers `arxiv2tex` as a local MCP server for OpenCode and adds workflow instructions from [docs/opencode-arxiv2tex.md](/E:/code/paper2tex/docs/opencode-arxiv2tex.md).
+This repository now includes a project-level [`opencode.json`](opencode.json) that registers `arxiv2tex` as a local MCP server for OpenCode and adds workflow instructions from [`docs/opencode-arxiv2tex.md`](docs/opencode-arxiv2tex.md).
 
 Install the package first:
 
