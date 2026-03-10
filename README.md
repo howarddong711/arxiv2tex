@@ -41,6 +41,20 @@ Run the default end-to-end workflow for an agent-facing prompt:
 arxiv2tex handle-prompt "帮我参考 attention is all you need 的实验部分写法"
 ```
 
+Run the agent-structured workflow (recommended when your coding agent already parsed the user prompt):
+
+```powershell
+arxiv2tex handle-intent "Attention Is All You Need" --section-hint "related work" --action-hint imitate --raw-prompt "看看这篇论文 related work 怎么组织的"
+```
+
+Inspect or resolve a structured intent without free-form prompt parsing:
+
+```powershell
+arxiv2tex interpret-intent "Attention Is All You Need" --section-hint "related work" --action-hint imitate
+arxiv2tex resolve-intent "Attention Is All You Need" --section-hint "related work" --action-hint imitate
+arxiv2tex prepare-intent "Attention Is All You Need" --section-hint "related work" --action-hint imitate
+```
+
 If a previous request returned multiple candidates, `handle-prompt` can consume a short follow-up confirmation such as `就这篇`, `第一个`, `就第一个吧`, or an arXiv id:
 
 ```powershell
@@ -81,6 +95,8 @@ arxiv2tex pending-status
 ```
 
 Pending confirmations expire automatically after 30 minutes by default, so stale candidate lists do not linger forever.
+
+For short or ambiguous titles (for example acronyms), `resolve-intent` can still return `confirm` so the agent can ask the user to choose from candidates.
 
 Read from a specific view:
 
