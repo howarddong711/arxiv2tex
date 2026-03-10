@@ -28,26 +28,8 @@
 把下面这一条 prompt 直接发给你的 coding agent（Codex / Claude Code / Cursor / Kiro / Gemini CLI / OpenCode / Antigravity）：
 
 ```text
-你只有这一条 prompt。请完成 arxiv2tex 的端到端部署，并验证 MCP 可用。
-
-项目链接：
-- 仓库: https://github.com/howarddong711/arxiv2tex
-- 英文 README: https://github.com/howarddong711/arxiv2tex/blob/main/README.md
-- 中文 README: https://github.com/howarddong711/arxiv2tex/blob/main/README.zh.md
-- OpenCode MCP 示例配置: https://github.com/howarddong711/arxiv2tex/blob/main/opencode.json
-- OpenCode 工作流说明: https://github.com/howarddong711/arxiv2tex/blob/main/docs/opencode-arxiv2tex.md
-
-要求：
-1. 如果本地没有该仓库，先 clone；如果已有工作区，直接使用现有目录。
-2. 自动检测一个可用 Python 解释器，并在安装与 MCP 启动时使用同一个解释器。
-3. 用 `pip install -e .[dev]` 安装。
-4. 验证 `python -m arxiv2tex.mcp --help`。
-5. 为当前客户端（Codex / Claude Code / Cursor / Kiro / Gemini CLI / OpenCode / Antigravity）配置 MCP，使用以下 stdio server 命令：
-   `<python> -m arxiv2tex.mcp --cache-root .arxiv2tex-cache`
-6. 在当前客户端确认 MCP 已连接。
-7. 运行这条 smoke test prompt 并展示工具结果：
-   `介绍一下这个论文 COLD: A Benchmark for Chinese Offensive Language Detection`
-8. 最后输出报告：执行命令、修改文件、MCP 连接状态、smoke test 输出。
+请严格按这个安装指南完成 arxiv2tex 部署与 MCP 连接：
+https://raw.githubusercontent.com/howarddong711/arxiv2tex/main/docs/guide/agent-install.md
 ```
 
 这是推荐接入方式：用户一句话，agent 自动完成部署。

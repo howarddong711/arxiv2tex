@@ -28,26 +28,8 @@ It is designed for arXiv-first, source-package-first, reusable retrieval workflo
 Copy this single prompt to your coding agent (Codex / Claude Code / Cursor / Kiro / Gemini CLI / OpenCode / Antigravity):
 
 ```text
-You only have this prompt. Set up arxiv2tex end-to-end and verify MCP is ready.
-
-Project links:
-- Repo: https://github.com/howarddong711/arxiv2tex
-- English README: https://github.com/howarddong711/arxiv2tex/blob/main/README.md
-- Chinese README: https://github.com/howarddong711/arxiv2tex/blob/main/README.zh.md
-- OpenCode MCP example: https://github.com/howarddong711/arxiv2tex/blob/main/opencode.json
-- OpenCode workflow notes: https://github.com/howarddong711/arxiv2tex/blob/main/docs/opencode-arxiv2tex.md
-
-Requirements:
-1. If the repo is not present locally, clone it. Otherwise use the existing checkout.
-2. Detect one available Python interpreter and use the same interpreter for both install and MCP launch.
-3. Install with `pip install -e .[dev]`.
-4. Verify `python -m arxiv2tex.mcp --help`.
-5. Configure MCP for the current client (Codex / Claude Code / Cursor / Kiro / Gemini CLI / OpenCode / Antigravity) using this stdio server command:
-   `<python> -m arxiv2tex.mcp --cache-root .arxiv2tex-cache`
-6. Confirm MCP is connected in the current client.
-7. Run this smoke test prompt and show the tool result:
-   `介绍一下这个论文 COLD: A Benchmark for Chinese Offensive Language Detection`
-8. Print a final report: commands run, files changed, MCP connection status, and smoke test output.
+Install and configure arxiv2tex by following this guide exactly:
+https://raw.githubusercontent.com/howarddong711/arxiv2tex/main/docs/guide/agent-install.md
 ```
 
 This is the preferred onboarding flow: user sends one prompt, the agent completes deployment.
