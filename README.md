@@ -23,6 +23,26 @@ It is designed for arXiv-first, source-package-first, reusable retrieval workflo
 
 ## Quick Start
 
+### Agent Auto-Deploy (Recommended)
+
+Copy this prompt to your coding agent (Codex / Claude Code / OpenCode) in this repository root:
+
+```text
+Set up arxiv2tex end-to-end in this repository and verify it is ready.
+
+Requirements:
+1. Detect the Python interpreter available in this environment and use it consistently for install + MCP launch.
+2. Install the package in editable mode with dev dependencies.
+3. Verify `python -m arxiv2tex.mcp --help` succeeds.
+4. Configure MCP for the current client:
+   - If Codex CLI is available, register arxiv2tex with `codex mcp add`.
+   - If this is OpenCode, use project `opencode.json` and verify with `opencode mcp list`.
+5. Run a smoke test prompt through arxiv2tex and show the result.
+6. Report exactly what was changed and how to confirm the server is connected.
+```
+
+This is the preferred onboarding flow: user gives one prompt, the agent completes deployment.
+
 Create a virtual environment and install the package:
 
 ```powershell
