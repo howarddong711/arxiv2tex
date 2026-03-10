@@ -100,6 +100,12 @@ Run the MCP server over stdio:
 arxiv2tex-mcp
 ```
 
+Use a custom cache root when running the MCP server directly:
+
+```powershell
+arxiv2tex-mcp --cache-root .arxiv2tex-cache
+```
+
 The default cache location is `.arxiv2tex-cache` in the current working directory.
 
 Cached view files:
@@ -115,3 +121,23 @@ Cached view files:
 - starter sentences
 - simple style signals such as citation or figure-reference density
 - section-specific guidance for agent-assisted writing
+
+## OpenCode
+
+This repository now includes a project-level [opencode.json](/E:/code/paper2tex/opencode.json) that registers `arxiv2tex` as a local MCP server for OpenCode and adds workflow instructions from [docs/opencode-arxiv2tex.md](/E:/code/paper2tex/docs/opencode-arxiv2tex.md).
+
+Install the package first:
+
+```powershell
+py -3.10 -m pip install -e .[dev]
+```
+
+Then open this project in OpenCode and confirm the MCP server is visible:
+
+```powershell
+opencode mcp list
+```
+
+If you prefer a global OpenCode config instead of the project file, copy the `mcp.arxiv2tex` block from `opencode.json` into your user config.
+
+The project config launches `python.exe -m arxiv2tex.mcp`, so `pip install -e .[dev]` must have completed successfully before OpenCode starts the server.
