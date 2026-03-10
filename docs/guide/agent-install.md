@@ -25,7 +25,7 @@ Goal: install arxiv2tex and connect it as an MCP server in the current coding-ag
    - Other MCP clients: use their MCP server list/status command
 
 7. Run one smoke test prompt through arxiv2tex:
-   - `介绍一下这个论文 COLD: A Benchmark for Chinese Offensive Language Detection`
+   - `介绍一下这篇论文 Attention Is All You Need`
 
 8. Output a final report:
    - interpreter path
