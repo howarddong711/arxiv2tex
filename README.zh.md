@@ -29,6 +29,9 @@
 
 ```text
 请严格按这个安装指南完成 arxiv2tex 部署与 MCP 连接：
+https://github.com/howarddong711/arxiv2tex/blob/main/docs/guide/agent-install.md
+
+如果你的客户端更偏好抓取纯文本，可使用：
 https://raw.githubusercontent.com/howarddong711/arxiv2tex/refs/heads/main/docs/guide/agent-install.md
 ```
 
