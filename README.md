@@ -1,5 +1,7 @@
 # arxiv2tex
 
+**English** | [中文](README.zh.md)
+
 `arxiv2tex` is an arXiv-first paper cache for coding agents such as Codex, Claude Code, and OpenCode.
 
 It resolves natural-language requests for papers, searches arXiv, downloads source packages, expands multi-file LaTeX projects into a cached `full.tex`, and exposes low-context retrieval tools through a CLI and a minimal MCP server.
