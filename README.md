@@ -25,23 +25,32 @@ It is designed for arXiv-first, source-package-first, reusable retrieval workflo
 
 ### Agent Auto-Deploy (Recommended)
 
-Copy this prompt to your coding agent (Codex / Claude Code / OpenCode) in this repository root:
+Copy this single prompt to your coding agent (Codex / Claude Code / Cursor / Kiro / Gemini CLI / OpenCode / Antigravity):
 
 ```text
-Set up arxiv2tex end-to-end in this repository and verify it is ready.
+You only have this prompt. Set up arxiv2tex end-to-end and verify MCP is ready.
+
+Project links:
+- Repo: https://github.com/howarddong711/arxiv2tex
+- English README: https://github.com/howarddong711/arxiv2tex/blob/main/README.md
+- Chinese README: https://github.com/howarddong711/arxiv2tex/blob/main/README.zh.md
+- OpenCode MCP example: https://github.com/howarddong711/arxiv2tex/blob/main/opencode.json
+- OpenCode workflow notes: https://github.com/howarddong711/arxiv2tex/blob/main/docs/opencode-arxiv2tex.md
 
 Requirements:
-1. Detect the Python interpreter available in this environment and use it consistently for install + MCP launch.
-2. Install the package in editable mode with dev dependencies.
-3. Verify `python -m arxiv2tex.mcp --help` succeeds.
-4. Configure MCP for the current client:
-   - If Codex CLI is available, register arxiv2tex with `codex mcp add`.
-   - If this is OpenCode, use project `opencode.json` and verify with `opencode mcp list`.
-5. Run a smoke test prompt through arxiv2tex and show the result.
-6. Report exactly what was changed and how to confirm the server is connected.
+1. If the repo is not present locally, clone it. Otherwise use the existing checkout.
+2. Detect one available Python interpreter and use the same interpreter for both install and MCP launch.
+3. Install with `pip install -e .[dev]`.
+4. Verify `python -m arxiv2tex.mcp --help`.
+5. Configure MCP for the current client (Codex / Claude Code / Cursor / Kiro / Gemini CLI / OpenCode / Antigravity) using this stdio server command:
+   `<python> -m arxiv2tex.mcp --cache-root .arxiv2tex-cache`
+6. Confirm MCP is connected in the current client.
+7. Run this smoke test prompt and show the tool result:
+   `介绍一下这个论文 COLD: A Benchmark for Chinese Offensive Language Detection`
+8. Print a final report: commands run, files changed, MCP connection status, and smoke test output.
 ```
 
-This is the preferred onboarding flow: user gives one prompt, the agent completes deployment.
+This is the preferred onboarding flow: user sends one prompt, the agent completes deployment.
 
 Create a virtual environment and install the package:
 
