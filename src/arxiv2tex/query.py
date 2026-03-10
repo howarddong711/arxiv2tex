@@ -1,5 +1,5 @@
 import re
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 from .types import PromptIntent
 
@@ -10,13 +10,34 @@ ARXIV_ID_RE = re.compile(
 )
 
 CN_TITLE_RE = re.compile(r"《([^》]+)》")
-QUOTE_RE = re.compile(r"[\"“”'‘’]([^\"“”'‘’]{3,})[\"“”'‘’]")
-LATIN_TITLE_SPAN_RE = re.compile(r"([A-Z][A-Za-z0-9:+/\-]+(?:\s+[A-Z0-9][A-Za-z0-9:+/\-]+){1,14})")
+QUOTE_RE = re.compile(r"[\"“”'‘’]([^\"“”'‘’]{2,})[\"“”'‘’]")
+LATIN_TITLE_SPAN_RE = re.compile(
+    r"([A-Za-z0-9][A-Za-z0-9:+/\-]*(?:\s+[A-Za-z0-9][A-Za-z0-9:+/\-]*){0,14})"
+)
+ACRONYM_RE = re.compile(r"\b[A-Z][A-Z0-9\-]{1,15}\b")
+TITLE_BEFORE_PAPER_RE = re.compile(
+    r"(?P<query>.+?)\s*(?:这篇论文|这篇paper|这篇 paper|the paper|paper).*$",
+    re.IGNORECASE,
+)
 
 SECTION_PATTERNS = [
-    re.compile(r"(?:的|里|中)(?P<section>摘要|引言|介绍|相关工作|背景|方法|实验|结果|结论|附录|related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)(?:部分|章节|一节)?", re.IGNORECASE),
+    re.compile(
+        r"(?:的|里|中)(?P<section>摘要|引言|介绍|相关工作|背景|方法|实验|结果|结论|附录|related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)(?:部分|章节|一节)?",
+        re.IGNORECASE,
+    ),
     re.compile(r"(?:section|章节)\s*(?P<section>[A-Za-z0-9 .:+/\-]+)", re.IGNORECASE),
-    re.compile(r"(?P<section>related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)\s+section", re.IGNORECASE),
+    re.compile(
+        r"(?P<section>related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)\s+section",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?P<section>摘要|引言|介绍|相关工作|背景|方法|实验|结果|结论|附录|related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)(?:\s+(?:section|part))?(?=\s*(?:怎么组织(?:的)?|如何组织|怎么写|如何写|写法|怎么展开|如何展开|怎么安排|如何安排|部分|章节|内容|$))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?P<section>摘要|引言|介绍|相关工作|背景|方法|实验|结果|结论|附录|related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)(?=\s*(?:里|中|内|部分|章节|表格|图|figure|table|$))",
+        re.IGNORECASE,
+    ),
 ]
 
 SECTION_ALIASES = {
@@ -43,10 +64,16 @@ SECTION_ALIASES = {
 }
 
 ACTION_PATTERNS = [
-    ("read", re.compile(r"阅读|读一下|看看|看一下|read", re.IGNORECASE)),
+    (
+        "imitate",
+        re.compile(
+            r"借鉴|模仿|参考|写法|风格|怎么组织|如何组织|怎么写|如何写|怎么展开|如何展开|怎么安排|如何安排|imitate|follow",
+            re.IGNORECASE,
+        ),
+    ),
     ("summarize", re.compile(r"总结|概括|summari[sz]e", re.IGNORECASE)),
-    ("imitate", re.compile(r"借鉴|模仿|参考|写法|风格|imitate|follow", re.IGNORECASE)),
     ("extract", re.compile(r"提取|抽取|extract", re.IGNORECASE)),
+    ("read", re.compile(r"阅读|读一下|看看|看一下|read", re.IGNORECASE)),
 ]
 
 TRAILING_CLAUSE_RE = re.compile(
@@ -71,6 +98,9 @@ NOISE_TERMS = [
     r"看看",
     r"看",
     r"分析",
+    r"学习一下",
+    r"学习下",
+    r"学习",
     r"总结",
     r"借鉴",
     r"参考",
@@ -87,6 +117,15 @@ NOISE_TERMS = [
     r"原文",
     r"原始",
     r"写法",
+    r"怎么组织的",
+    r"怎么组织",
+    r"如何组织",
+    r"怎么写",
+    r"如何写",
+    r"怎么展开",
+    r"如何展开",
+    r"怎么安排",
+    r"如何安排",
     r"风格",
     r"部分",
     r"章节",
@@ -120,12 +159,44 @@ def parse_prompt_intent(text: str) -> PromptIntent:
 
 
 def extract_title_query(text: str) -> str:
+    candidates = extract_title_candidates(text)
+    if candidates:
+        return candidates[0]
+    return text.strip()
+
+
+def extract_title_candidates(text: str) -> List[str]:
     text = text.strip()
+    candidates: List[str] = []
+
+    def add_literal_candidate(value: str) -> None:
+        cleaned = clean_wrapped_title(value)
+        if not cleaned:
+            return
+        if cleaned not in candidates:
+            candidates.append(cleaned)
+
+    def add_candidate(value: str) -> None:
+        cleaned = clean_candidate_query(value)
+        if not cleaned:
+            return
+        if cleaned not in candidates:
+            candidates.append(cleaned)
+
+    def add_span_candidates(value: str) -> None:
+        for span in LATIN_TITLE_SPAN_RE.findall(value):
+            cleaned = clean_candidate_query(span)
+            if _is_title_like(cleaned):
+                add_candidate(cleaned)
+        for span in ACRONYM_RE.findall(value):
+            cleaned = clean_candidate_query(span)
+            if _is_title_like(cleaned):
+                add_candidate(cleaned)
 
     for pattern in (CN_TITLE_RE, QUOTE_RE):
         match = pattern.search(text)
         if match:
-            return clean_wrapped_title(match.group(1))
+            add_literal_candidate(match.group(1))
 
     stripped = TRAILING_CLAUSE_RE.sub("", text)
     stripped = strip_section_clauses(stripped)
@@ -133,25 +204,62 @@ def extract_title_query(text: str) -> str:
     stripped = re.sub(r"https?://\S+", " ", stripped)
 
     named_patterns = [
-        re.compile(r"(?:论文|paper)\s*(?:叫|名为|标题是|title is|titled)?\s*(?P<query>.+)", re.IGNORECASE),
+        re.compile(
+            r"(?:论文|paper)\s*(?:叫|名为|标题是|title is|titled)\s*(?P<query>.+)",
+            re.IGNORECASE,
+        ),
         re.compile(r"(?:关于|\bon\b|\babout\b)\s+(?P<query>.+)", re.IGNORECASE),
     ]
+
+    before_paper_match = TITLE_BEFORE_PAPER_RE.search(stripped)
+    if before_paper_match:
+        before_paper = before_paper_match.group("query")
+        add_span_candidates(before_paper)
+        add_candidate(before_paper)
+
     for pattern in named_patterns:
         match = pattern.search(stripped)
         if match:
-            candidate = clean_candidate_query(match.group("query"))
-            if candidate:
-                return candidate
+            named = match.group("query")
+            add_span_candidates(named)
+            add_candidate(named)
 
-    latin_spans = LATIN_TITLE_SPAN_RE.findall(stripped)
-    if latin_spans:
-        best = max(latin_spans, key=len)
-        candidate = clean_candidate_query(best)
-        if candidate:
-            return candidate
+    add_span_candidates(stripped)
+    add_candidate(stripped)
 
-    candidate = clean_candidate_query(stripped)
-    return candidate or text
+    filtered = [candidate for candidate in candidates if _is_title_like(candidate)]
+    if filtered:
+        return filtered
+
+    return candidates
+
+
+def _is_title_like(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.strip()
+    if len(normalized) <= 1:
+        return False
+    if normalized.lower() in {
+        "appendix",
+        "related work",
+        "background",
+        "method",
+        "results",
+        "conclusion",
+    }:
+        return False
+    token_count = len(normalized.split())
+    has_ascii = bool(re.search(r"[A-Za-z]", normalized))
+    has_cjk = bool(re.search(r"[\u4e00-\u9fff]", normalized))
+    has_digit = bool(re.search(r"\d", normalized))
+    if has_ascii and token_count <= 16:
+        return True
+    if has_digit and token_count <= 16:
+        return True
+    if has_cjk and 1 <= token_count <= 12:
+        return True
+    return False
 
 
 def extract_section_hint(text: str) -> Optional[str]:
@@ -188,7 +296,15 @@ def strip_section_clauses(text: str) -> str:
         text,
         flags=re.IGNORECASE,
     )
-    text = re.sub(r"(?:section|章节)\s*[A-Za-z0-9 .:+/\-]+", " ", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"(?:section|章节)\s*[A-Za-z0-9 .:+/\-]+", " ", text, flags=re.IGNORECASE
+    )
+    text = re.sub(
+        r"(?:摘要|引言|介绍|相关工作|背景|方法|实验|结果|结论|附录|related work|background|introduction|method|methods|experiment|experiments|results|conclusion|appendix)(?:\s+(?:section|part))?(?=\s*(?:怎么组织(?:的)?|如何组织|怎么写|如何写|写法|怎么展开|如何展开|怎么安排|如何安排|部分|章节|内容|$))",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
     return text
 
 

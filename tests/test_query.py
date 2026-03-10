@@ -29,11 +29,31 @@ def test_parse_prompt_intent_prefers_quoted_title():
 
 
 def test_extract_title_query_removes_simple_watch_verb():
-    assert extract_title_query("帮我看 attention all you need") == "attention all you need"
+    assert (
+        extract_title_query("帮我看 attention all you need") == "attention all you need"
+    )
 
 
 def test_parse_prompt_intent_related_work_and_writing_style():
     intent = parse_prompt_intent("请参考某篇论文的相关工作写法")
     assert intent.section_hint == "相关工作"
     assert "related work" in intent.section_queries
+    assert intent.action_hint == "imitate"
+
+
+def test_parse_prompt_intent_handles_title_before_paper_and_related_work():
+    prompt = "看看 attention is all you need 这篇论文 related work 怎么组织的"
+    intent = parse_prompt_intent(prompt)
+    assert intent.paper_query == "attention is all you need"
+    assert intent.section_hint == "related work"
+    assert "background" in intent.section_queries
+    assert intent.action_hint == "imitate"
+
+
+def test_parse_prompt_intent_handles_acronym_title_and_appendix():
+    prompt = "你学习一下GMP这篇论文附录里表格的写法"
+    intent = parse_prompt_intent(prompt)
+    assert intent.paper_query == "GMP"
+    assert intent.section_hint == "附录"
+    assert "appendix" in intent.section_queries
     assert intent.action_hint == "imitate"
