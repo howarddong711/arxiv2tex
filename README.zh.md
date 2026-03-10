@@ -29,7 +29,7 @@
 
 ```text
 请严格按这个安装指南完成 arxiv2tex 部署与 MCP 连接：
-https://raw.githubusercontent.com/howarddong711/arxiv2tex/main/docs/guide/agent-install.md
+https://raw.githubusercontent.com/howarddong711/arxiv2tex/refs/heads/main/docs/guide/agent-install.md
 ```
 
 这是推荐接入方式：用户一句话，agent 自动完成部署。

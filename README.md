@@ -29,7 +29,7 @@ Copy this single prompt to your coding agent (Codex / Claude Code / Cursor / Kir
 
 ```text
 Install and configure arxiv2tex by following this guide exactly:
-https://raw.githubusercontent.com/howarddong711/arxiv2tex/main/docs/guide/agent-install.md
+https://raw.githubusercontent.com/howarddong711/arxiv2tex/refs/heads/main/docs/guide/agent-install.md
 ```
 
 This is the preferred onboarding flow: user sends one prompt, the agent completes deployment.
