@@ -29,9 +29,6 @@ Copy this single prompt to your coding agent (Codex / Claude Code / Cursor / Kir
 
 ```text
 Install and configure arxiv2tex by following this guide exactly:
-https://github.com/howarddong711/arxiv2tex/blob/main/docs/guide/agent-install.md
-
-If your client prefers raw text fetching, use:
 https://raw.githubusercontent.com/howarddong711/arxiv2tex/refs/heads/main/docs/guide/agent-install.md
 ```
 
