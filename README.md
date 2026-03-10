@@ -4,6 +4,12 @@
 
 It resolves natural-language requests for papers, searches arXiv, downloads source packages, expands multi-file LaTeX projects into a cached `full.tex`, and exposes low-context retrieval tools through a CLI and a minimal MCP server.
 
+## Project Positioning
+
+`arxiv2tex` is agent infrastructure, not another chat model.
+It acts as an execution layer between user intent and arXiv paper source retrieval: the user provides one simple prompt, the upstream coding agent interprets that prompt, and `arxiv2tex` deterministically handles paper resolution, source caching, TeX expansion, and low-context reading.
+It is designed for arXiv-first, source-package-first, reusable retrieval workflows in LaTeX writing tasks, and is intentionally not a generic PDF/OCR tool or a traditional reference manager.
+
 ## Features
 
 - Extract a likely paper query from a natural-language prompt
